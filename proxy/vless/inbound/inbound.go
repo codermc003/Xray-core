@@ -523,6 +523,35 @@ func (h *Handler) Process(ctx context.Context, network net.Network, connection s
 	if err := connection.SetReadDeadline(time.Time{}); err != nil {
 		errors.LogWarningInner(ctx, err, "unable to set back read deadline")
 	}
+	// Extract SNI/ALPN from TLS or REALITY and store into routing content attributes
+	var sni, alpn string
+	if tlsConn, ok := iConn.(*tls.Conn); ok {
+		cs := tlsConn.ConnectionState()
+		sni = strings.ToLower(cs.ServerName)
+		alpn = strings.ToLower(cs.NegotiatedProtocol)
+	} else if gotlsConn, ok := iConn.(*gotls.Conn); ok {
+		cs := gotlsConn.ConnectionState()
+		sni = strings.ToLower(cs.ServerName)
+		alpn = strings.ToLower(cs.NegotiatedProtocol)
+	} else if realityConn, ok := iConn.(*reality.Conn); ok {
+		cs := realityConn.ConnectionState()
+		sni = strings.ToLower(cs.ServerName)
+		alpn = strings.ToLower(cs.NegotiatedProtocol)
+	}
+	if sni != "" || alpn != "" {
+		content := session.ContentFromContext(ctx)
+		if content == nil {
+			content = &session.Content{}
+		}
+		if sni != "" {
+			content.SetAttribute("sni", sni)
+		}
+		if alpn != "" {
+			content.SetAttribute("alpn", alpn)
+		}
+		ctx = session.ContextWithContent(ctx, content)
+		errors.LogInfo(ctx, "inbound attrs set: sni=", sni, " alpn=", alpn)
+	}
 	errors.LogInfo(ctx, "received request for ", request.Destination())
 
 	inbound := session.InboundFromContext(ctx)
